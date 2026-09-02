@@ -8,6 +8,7 @@
 
 mod app;
 mod edit;
+mod secrets;
 mod ssh;
 mod storage;
 mod ui;
@@ -23,6 +24,7 @@ use crossterm::{
 use ratatui::{backend::CrosstermBackend, Terminal};
 
 use app::{App, Mode};
+use secrets::Secrets;
 use storage::HostFile;
 
 fn main() -> anyhow::Result<()> {
@@ -53,7 +55,7 @@ fn restore_terminal(
 
 fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Result<()> {
     let path = HostFile::default_path().context("could not resolve hosts data path")?;
-    let mut app = App::new(HostFile::new(path));
+    let mut app = App::new(HostFile::new(path), Secrets::system());
     terminal.hide_cursor().context("hide_cursor failed")?;
 
     while !app.should_quit {

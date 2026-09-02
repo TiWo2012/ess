@@ -189,7 +189,7 @@ fn draw_form(frame: &mut Frame, app: &mut App) {
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " password sent automatically on connect; stored plaintext — keyring TODO ",
+            " password sent automatically on connect; stored in the OS keyring ",
             Style::default().fg(Color::DarkGray),
         )))
         .alignment(Alignment::Center),

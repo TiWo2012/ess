@@ -29,7 +29,7 @@ const ASKPASS_SHELL: &str = "/bin/sh";
 /// so ssh output starts clean.
 fn leave_terminal() -> Result<()> {
     use crossterm::{
-        cursor::MoveTo,
+        cursor::{MoveTo, Show},
         execute,
         terminal::{disable_raw_mode, Clear, ClearType, LeaveAlternateScreen},
     };
@@ -40,7 +40,10 @@ fn leave_terminal() -> Result<()> {
         out,
         LeaveAlternateScreen,
         Clear(ClearType::All),
-        MoveTo(0, 0)
+        MoveTo(0, 0),
+        // The TUI ran with the cursor hidden (`Hide`); make sure the ssh
+        // session gets a visible cursor.
+        Show
     )
     .context("leaving alternate screen")?;
     out.flush().context("flush stdout")?;

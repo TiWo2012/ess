@@ -110,7 +110,7 @@ fn draw_form(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     // Never exceed the available area (tiny/zero-width terminals must not panic).
     let w = area.width.clamp(24, 52).min(area.width);
-    let h = 12.min(area.height);
+    let h = 15.min(area.height);
     let popup = Rect {
         x: area.x + (area.width - w) / 2,
         y: area.y + area.height.saturating_sub(h) / 2,
@@ -141,9 +141,10 @@ fn draw_form(frame: &mut Frame, app: &mut App) {
         width: popup.width.saturating_sub(2),
         height: popup.height.saturating_sub(2),
     };
-    let [hostname_area, port_area, password_area, hint_area] = Layout::default()
+    let [hostname_area, user_area, port_area, password_area, hint_area] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
@@ -160,6 +161,18 @@ fn draw_form(frame: &mut Frame, app: &mut App) {
             .borders(Borders::ALL)
             .border_style(focus_border(focused))
             .title(" Host name "),
+        focused,
+    );
+
+    // User field.
+    let focused = app.form_field == Field::User;
+    app.form_user.render(
+        frame,
+        user_area,
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(focus_border(focused))
+            .title(" User (empty = local user) "),
         focused,
     );
 

@@ -8,7 +8,10 @@ use ratatui::widgets::ListState;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Host {
-    /// `user@host` or a plain hostname — anything `ssh` accepts as a target.
+    /// Login username; when empty, ssh uses the local user (or whatever is
+    /// embedded in `hostname`).
+    pub username: String,
+    /// Hostname or `user@host` — anything `ssh` accepts as a target.
     pub hostname: String,
     /// 0 = use ssh's default port (22).
     pub port: u16,
@@ -20,7 +23,12 @@ pub struct Host {
 impl Host {
     /// Human-friendly label like `user@host:2222`; also the keyring key.
     pub fn label(&self) -> String {
-        secrets::host_key(&self.hostname, self.port)
+        let base = if self.username.is_empty() {
+            self.hostname.clone()
+        } else {
+            format!("{}@{}", self.username, self.hostname)
+        };
+        secrets::host_key(&base, self.port)
     }
 }
 
@@ -33,6 +41,7 @@ pub enum Mode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Field {
     Hostname,
+    User,
     Port,
     Password,
 }
@@ -45,6 +54,7 @@ pub struct App {
     /// Which form field is focused while in `Mode::AddHost` / edit mode.
     pub form_field: Field,
     pub form_hostname: EditValue,
+    pub form_user: EditValue,
     pub form_port: EditValue,
     pub form_password: EditValue,
     /// `Some(i)` while the form is open to *edit* host `i` (None = adding).
@@ -70,8 +80,28 @@ impl App {
 
         let mut hosts = Vec::with_capacity(stored.len());
         let mut migrate: Vec<(String, String)> = Vec::new();
+        let mut rewrite = false;
         for s in &stored {
-            let key = secrets::host_key(&s.hostname, s.port);
+            // Legacy files may hold `user@host` in the hostname; split that
+            // into the explicit username field (written back on next save).
+            let (username, hostname) = if s.username.is_empty() {
+                match s.hostname.split_once('@') {
+                    Some((u, h)) if !u.is_empty() && !h.is_empty() => {
+                        rewrite = true;
+                        (u.to_string(), h.to_string())
+                    }
+                    _ => (String::new(), s.hostname.clone()),
+                }
+            } else {
+                (s.username.clone(), s.hostname.clone())
+            };
+            let host = Host {
+                username,
+                hostname: hostname.clone(),
+                port: s.port,
+                password: String::new(),
+            };
+            let key = host.label();
             let legacy = s.password.clone().unwrap_or_default();
             let password = match secrets.get(&key) {
                 Ok(Some(pw)) => pw,
@@ -85,21 +115,19 @@ impl App {
                 // Keyring unreachable → keep the plaintext fallback for now.
                 Err(()) => legacy,
             };
-            hosts.push(Host {
-                hostname: s.hostname.clone(),
-                port: s.port,
-                password,
-            });
+            hosts.push(Host { password, ..host });
         }
 
         // One-time migration: legacy plaintext passwords → OS keyring, then
-        // rewrite the file so passwords no longer sit on disk.
+        // rewrite the file so passwords no longer sit on disk. Also persists
+        // the username/hostname split for legacy files.
         if secrets.available() && !migrate.is_empty() {
             let all_ok = migrate.iter().all(|(key, pw)| secrets.set(key, pw).is_ok());
-            if all_ok {
-                if let Err(e) = file.save(&hosts, false) {
-                    eprintln!("warning: could not rewrite hosts.json: {e:#}");
-                }
+            rewrite |= all_ok;
+        }
+        if rewrite {
+            if let Err(e) = file.save(&hosts, !secrets.available()) {
+                eprintln!("warning: could not rewrite hosts.json: {e:#}");
             }
         }
 
@@ -119,6 +147,7 @@ impl App {
             list,
             form_field: Field::Hostname,
             form_hostname: EditValue::new(false),
+            form_user: EditValue::new(false),
             form_port: EditValue::new(false).numeric(),
             form_password: EditValue::new(true),
             edit_index: None,
@@ -180,11 +209,13 @@ impl App {
                     String::new()
                 };
                 self.form_hostname = EditValue::from(&h.hostname, false);
+                self.form_user = EditValue::from(&h.username, false);
                 self.form_port = EditValue::from(&port, false).numeric();
                 self.form_password = EditValue::from(&h.password, true);
             }
             None => {
                 self.form_hostname.clear();
+                self.form_user.clear();
                 self.form_port.clear();
                 self.form_password.clear();
             }
@@ -244,6 +275,7 @@ impl App {
     fn focused(&mut self) -> &mut EditValue {
         match self.form_field {
             Field::Hostname => &mut self.form_hostname,
+            Field::User => &mut self.form_user,
             Field::Port => &mut self.form_port,
             Field::Password => &mut self.form_password,
         }
@@ -251,7 +283,8 @@ impl App {
 
     fn focus_next(&mut self) {
         self.form_field = match self.form_field {
-            Field::Hostname => Field::Port,
+            Field::Hostname => Field::User,
+            Field::User => Field::Port,
             Field::Port => Field::Password,
             Field::Password => Field::Hostname,
         };
@@ -273,6 +306,7 @@ impl App {
             self.status = Some("Host name is required".into());
             return;
         }
+        let username = self.form_user.value().trim().to_string();
         let port = match self.form_port.value().parse::<u16>() {
             Ok(p) => p,
             Err(_) if self.form_port.value().is_empty() => 0,
@@ -283,11 +317,12 @@ impl App {
         };
         let password = self.form_password.value().to_string();
         let host = Host {
+            username,
             hostname: hostname.clone(),
             port,
             password: password.clone(),
         };
-        let key = secrets::host_key(&host.hostname, host.port);
+        let key = host.label();
 
         let warn = match self.edit_index {
             Some(i) => {
@@ -372,6 +407,7 @@ mod tests {
         for c in "web1".chars() {
             app.on_key(key(KeyCode::Char(c)));
         }
+        app.on_key(key(KeyCode::Tab)); // -> user
         app.on_key(key(KeyCode::Tab)); // -> port
         app.on_key(key(KeyCode::Tab)); // -> password
         for c in "s3cret!".chars() {
@@ -385,9 +421,43 @@ mod tests {
     }
 
     #[test]
+    fn username_is_stored_and_used_in_label() {
+        let mut app = app_with_fake_keyring();
+        app.on_key(key(KeyCode::Char('a')));
+        for c in "server".chars() {
+            app.on_key(key(KeyCode::Char(c)));
+        }
+        app.on_key(key(KeyCode::Tab)); // -> user
+        for c in "alice".chars() {
+            app.on_key(key(KeyCode::Char(c)));
+        }
+        app.on_key(key(KeyCode::Tab)); // -> port
+        app.on_key(key(KeyCode::Tab)); // -> password
+        app.on_key(key(KeyCode::Enter));
+        assert_eq!(app.hosts[0].username, "alice");
+        assert_eq!(app.hosts[0].label(), "alice@server");
+    }
+
+    #[test]
+    fn legacy_user_in_hostname_is_split() {
+        let file = temp_file();
+        std::fs::write(
+            file.path(),
+            r#"[{"hostname":"alice@server","password":"x"}]"#,
+        )
+        .unwrap();
+        let secrets = Secrets::fake();
+        let app = App::new(file, secrets);
+        assert_eq!(app.hosts[0].username, "alice");
+        assert_eq!(app.hosts[0].hostname, "server");
+        assert_eq!(app.hosts[0].label(), "alice@server");
+    }
+
+    #[test]
     fn enter_requests_connect_for_selected() {
         let mut app = app_with_fake_keyring();
         app.hosts.push(Host {
+            username: String::new(),
             hostname: "db".into(),
             port: 5432,
             password: String::new(),
@@ -402,6 +472,7 @@ mod tests {
     fn edit_updates_in_place() {
         let mut app = app_with_fake_keyring();
         app.hosts.push(Host {
+            username: String::new(),
             hostname: "old".into(),
             port: 0,
             password: String::new(),
@@ -413,6 +484,7 @@ mod tests {
         for c in "er".chars() {
             app.on_key(key(KeyCode::Char(c)));
         }
+        app.on_key(key(KeyCode::Tab)); // skip user
         app.on_key(key(KeyCode::Tab)); // skip port
         app.on_key(key(KeyCode::Tab)); // skip password
         app.on_key(key(KeyCode::Enter));
@@ -436,6 +508,7 @@ mod tests {
         let mut app = app_with_fake_keyring();
         app.on_key(key(KeyCode::Char('a')));
         app.on_key(key(KeyCode::Char('h'))); // hostname
+        app.on_key(key(KeyCode::Tab)); // -> user
         app.on_key(key(KeyCode::Tab)); // -> port
         app.on_key(key(KeyCode::Char('x'))); // rejected: not a digit
         app.on_key(key(KeyCode::Char('2')));
@@ -457,8 +530,9 @@ mod tests {
         for c in "web1".chars() {
             app.on_key(key(KeyCode::Char(c)));
         }
-        app.on_key(key(KeyCode::Tab));
-        app.on_key(key(KeyCode::Tab));
+        app.on_key(key(KeyCode::Tab)); // -> user
+        app.on_key(key(KeyCode::Tab)); // -> port
+        app.on_key(key(KeyCode::Tab)); // -> password
         for c in "s3cret!".chars() {
             app.on_key(key(KeyCode::Char(c)));
         }
@@ -507,8 +581,9 @@ mod tests {
         for c in "web1".chars() {
             app.on_key(key(KeyCode::Char(c)));
         }
-        app.on_key(key(KeyCode::Tab));
-        app.on_key(key(KeyCode::Tab));
+        app.on_key(key(KeyCode::Tab)); // -> user
+        app.on_key(key(KeyCode::Tab)); // -> port
+        app.on_key(key(KeyCode::Tab)); // -> password
         for c in "s3cret!".chars() {
             app.on_key(key(KeyCode::Char(c)));
         }
@@ -524,6 +599,7 @@ mod tests {
     fn delete_removes_keyring_entry() {
         let mut app = App::new(temp_file(), Secrets::fake());
         app.hosts.push(Host {
+            username: String::new(),
             hostname: "gone".into(),
             port: 0,
             password: "pw".into(),

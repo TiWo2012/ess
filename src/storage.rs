@@ -16,6 +16,9 @@ use crate::app::Host;
 /// while the OS keyring is unavailable (plaintext fallback).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct StoredHost {
+    /// Login username; empty = use ssh's default (local user).
+    #[serde(default)]
+    pub username: String,
     pub hostname: String,
     #[serde(default)]
     pub port: u16,
@@ -62,6 +65,7 @@ impl HostFile {
         let stored: Vec<StoredHost> = hosts
             .iter()
             .map(|h| StoredHost {
+                username: h.username.clone(),
                 hostname: h.hostname.clone(),
                 port: h.port,
                 password: if include_passwords && !h.password.is_empty() {

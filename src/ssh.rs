@@ -133,8 +133,17 @@ fn ssh_command(host: &Host, ask: Option<&Askpass>) -> Command {
         cmd.env("SSH_ASKPASS", ask.script_path())
             .env("SSH_ASKPASS_REQUIRE", "force");
     }
-    cmd.arg(&host.hostname);
+    cmd.arg(ssh_target(host));
     cmd
+}
+
+/// The `ssh` target: `user@host` when a username is set, plain host otherwise.
+fn ssh_target(host: &Host) -> String {
+    if host.username.is_empty() {
+        host.hostname.clone()
+    } else {
+        format!("{}@{}", host.username, host.hostname)
+    }
 }
 
 /// Temp script + password file that the askpass mechanism uses to answer ssh's
@@ -211,4 +220,26 @@ fn set_executable(path: &std::path::Path) -> Result<()> {
 #[cfg(not(unix))]
 fn set_executable(_path: &std::path::Path) -> Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::app::Host;
+
+    fn host(username: &str, hostname: &str) -> Host {
+        Host {
+            username: username.into(),
+            hostname: hostname.into(),
+            port: 0,
+            password: String::new(),
+        }
+    }
+
+    #[test]
+    fn target_with_username() {
+        assert_eq!(ssh_target(&host("alice", "server")), "alice@server");
+        assert_eq!(ssh_target(&host("", "server")), "server");
+        assert_eq!(ssh_target(&host("", "bob@server")), "bob@server");
+    }
 }

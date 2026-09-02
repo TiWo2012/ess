@@ -1,4 +1,4 @@
-//! Rendering: host list, footer, and the add-host popup.
+//! Rendering: host list, footer, and the add/edit-host popup.
 
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
@@ -21,7 +21,11 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
 fn draw_list(frame: &mut Frame, app: &mut App) {
     let [header, body, footer] = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(3), Constraint::Min(0), Constraint::Length(1)])
+        .constraints([
+            Constraint::Length(3),
+            Constraint::Min(0),
+            Constraint::Length(1),
+        ])
         .areas(frame.area());
 
     // Header block with host count in the top-right corner.
@@ -55,14 +59,18 @@ fn draw_list(frame: &mut Frame, app: &mut App) {
             .iter()
             .map(|h| {
                 let has_pw = !h.password.is_empty();
-                let pw = if has_pw { "password saved" } else { "no password" };
+                let pw = if has_pw {
+                    "password saved"
+                } else {
+                    "no password"
+                };
                 let pw_style = if has_pw {
                     Style::default().fg(Color::Green)
                 } else {
                     Style::default().fg(Color::DarkGray)
                 };
                 ListItem::new(Line::from(vec![
-                    Span::styled(h.hostname.clone(), Style::default().fg(Color::White)),
+                    Span::styled(h.label(), Style::default().fg(Color::White)),
                     Span::styled(format!("  [{pw}]"), pw_style),
                 ]))
             })
@@ -88,8 +96,10 @@ fn draw_list(frame: &mut Frame, app: &mut App) {
             Style::default().fg(Color::Yellow),
         ),
         None => (
-            Line::from(" j/k move · g/G top/bottom · a add · d delete · q quit ")
-                .alignment(Alignment::Center),
+            Line::from(
+                " Enter connect · j/k move · g/G top/bottom · a add · e edit · d delete · q quit ",
+            )
+            .alignment(Alignment::Center),
             Style::default().fg(Color::DarkGray),
         ),
     };
@@ -99,8 +109,8 @@ fn draw_list(frame: &mut Frame, app: &mut App) {
 fn draw_form(frame: &mut Frame, app: &mut App) {
     let area = frame.area();
     // Never exceed the available area (tiny/zero-width terminals must not panic).
-    let w = area.width.clamp(16, 48).min(area.width);
-    let h = 9.min(area.height);
+    let w = area.width.clamp(24, 52).min(area.width);
+    let h = 12.min(area.height);
     let popup = Rect {
         x: area.x + (area.width - w) / 2,
         y: area.y + area.height.saturating_sub(h) / 2,
@@ -112,7 +122,11 @@ fn draw_form(frame: &mut Frame, app: &mut App) {
         Block::default()
             .borders(Borders::ALL)
             .border_style(Style::default().fg(Color::Yellow))
-            .title(" Add host ")
+            .title(if app.edit_index.is_some() {
+                " Edit host "
+            } else {
+                " Add host "
+            })
             .title_bottom(
                 Line::from(" Enter: save · Esc: cancel · Tab: next field ")
                     .alignment(Alignment::Center)
@@ -127,9 +141,10 @@ fn draw_form(frame: &mut Frame, app: &mut App) {
         width: popup.width.saturating_sub(2),
         height: popup.height.saturating_sub(2),
     };
-    let [hostname_area, password_area, hint_area] = Layout::default()
+    let [hostname_area, port_area, password_area, hint_area] = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
+            Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(3),
             Constraint::Length(1),
@@ -148,6 +163,18 @@ fn draw_form(frame: &mut Frame, app: &mut App) {
         focused,
     );
 
+    // Port field.
+    let focused = app.form_field == Field::Port;
+    app.form_port.render(
+        frame,
+        port_area,
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(focus_border(focused))
+            .title(" Port (default 22) "),
+        focused,
+    );
+
     // Password field.
     let focused = app.form_field == Field::Password;
     app.form_password.render(
@@ -162,7 +189,7 @@ fn draw_form(frame: &mut Frame, app: &mut App) {
 
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
-            " stored in plaintext in hosts.json — keyring integration is TODO ",
+            " password sent automatically on connect; stored plaintext — keyring TODO ",
             Style::default().fg(Color::DarkGray),
         )))
         .alignment(Alignment::Center),

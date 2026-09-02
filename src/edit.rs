@@ -18,11 +18,33 @@ pub struct EditValue {
     cursor: usize,
     /// When set, the value renders as `*` (for password fields).
     masked: bool,
+    /// When set, only ASCII digits can be inserted (e.g. port fields).
+    numeric: bool,
 }
 
 impl EditValue {
     pub fn new(masked: bool) -> Self {
-        Self { value: String::new(), cursor: 0, masked }
+        Self {
+            value: String::new(),
+            cursor: 0,
+            masked,
+            numeric: false,
+        }
+    }
+
+    /// Build from an existing value (used to prefill the edit form).
+    pub fn from(value: &str, masked: bool) -> Self {
+        Self {
+            value: value.to_string(),
+            cursor: value.chars().count(),
+            masked,
+            numeric: false,
+        }
+    }
+
+    pub fn numeric(mut self) -> Self {
+        self.numeric = true;
+        self
     }
 
     pub fn value(&self) -> &str {
@@ -35,6 +57,9 @@ impl EditValue {
     }
 
     pub fn insert_char(&mut self, c: char) {
+        if self.numeric && !c.is_ascii_digit() {
+            return;
+        }
         self.value.insert(self.byte_index(), c);
         self.cursor += 1;
     }
@@ -88,7 +113,10 @@ impl EditValue {
     /// indicate focus). While focused, the terminal cursor is placed inside
     /// the field.
     pub fn render(&self, frame: &mut Frame, area: Rect, block: Block, focused: bool) {
-        frame.render_widget(Paragraph::new(self.visible_text(area.width)).block(block), area);
+        frame.render_widget(
+            Paragraph::new(self.visible_text(area.width)).block(block),
+            area,
+        );
 
         if focused {
             let (_, cursor_col) = self.window(area.width.saturating_sub(2) as usize);

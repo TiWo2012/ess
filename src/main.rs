@@ -8,6 +8,7 @@
 
 mod app;
 mod edit;
+mod ssh;
 mod storage;
 mod ui;
 
@@ -40,9 +41,12 @@ fn setup_terminal() -> anyhow::Result<Terminal<CrosstermBackend<std::io::Stdout>
 }
 
 /// Restore the terminal to a sane state, even on error paths.
-fn restore_terminal(mut terminal: Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Result<()> {
+fn restore_terminal(
+    mut terminal: Terminal<CrosstermBackend<std::io::Stdout>>,
+) -> anyhow::Result<()> {
     disable_raw_mode().context("disable_raw_mode failed")?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen).context("LeaveAlternateScreen failed")?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen)
+        .context("LeaveAlternateScreen failed")?;
     terminal.show_cursor().context("show_cursor failed")?;
     Ok(())
 }
@@ -69,6 +73,30 @@ fn run(terminal: &mut Terminal<CrosstermBackend<std::io::Stdout>>) -> anyhow::Re
                 if key.kind != KeyEventKind::Release {
                     app.on_key(key);
                 }
+            }
+        }
+
+        // Enter pressed on a host → run the real ssh session (blocks until it exits).
+        if let Some(idx) = app.take_connect_request() {
+            if let Some(host) = app.hosts.get(idx).cloned() {
+                let result = ssh::connect_session(&host);
+                app.set_status(match result {
+                    Ok(st) if st.success() => {
+                        format!("Session ended ({})", host.label())
+                    }
+                    Ok(st) => format!(
+                        "ssh exited ({}) with code {}",
+                        host.label(),
+                        st.code().unwrap_or(-1)
+                    ),
+                    Err(e) => format!("connect failed: {e:#}"),
+                });
+                // The alternate screen was replaced by the ssh session; draw an
+                // empty frame so the next frame repaints everything.
+                // (Deliberately NOT `Terminal::clear()`, which asks the terminal
+                // for its cursor position — terminals that don't answer that
+                // query would make us hang here.)
+                terminal.draw(|_frame| {})?;
             }
         }
     }

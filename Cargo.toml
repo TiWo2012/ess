@@ -1,0 +1,12 @@
+[package]
+name = "ess"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# ratatui: the modern, actively-maintained TUI library (fork of tui-rs)
+ratatui = "0.30.2"
+# crossterm: cross-platform terminal backend + input events (used by ratatui)
+crossterm = "0.29.0"
+# anyhow: dead-simple error handling (Result<T> + context)
+anyhow = "1.0.104"
